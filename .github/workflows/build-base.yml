@@ -6,9 +6,8 @@ on:
     branches: [main]
     paths:
       - 'images/base/**'
+      - '.shared/**'
       - '.github/workflows/build-base.yml'
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly Sunday rebuild
   workflow_dispatch:
     inputs:
       image:

@@ -1,0 +1,14 @@
+# Build artifacts
+**/build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Logs
+*.log

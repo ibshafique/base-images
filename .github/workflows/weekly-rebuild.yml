@@ -1,0 +1,72 @@
+# .github/workflows/weekly-rebuild.yml
+# Weekly rebuild of all base images to pick up upstream security patches
+# Triggers the main build-base.yml workflow for each image
+
+name: Weekly Rebuild
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Sunday midnight UTC
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Image to rebuild (or "all")'
+        required: false
+        default: 'all'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  trigger-rebuild:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [scratch-plus, distroless-static, wolfi-micro]
+
+    steps:
+      - name: Check if image should be rebuilt
+        id: check
+        run: |
+          INPUT="${{ github.event.inputs.image || 'all' }}"
+          if [[ "$INPUT" == "all" ]] || [[ "$INPUT" == "${{ matrix.image }}" ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger build workflow
+        if: steps.check.outputs.should_build == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build-base.yml',
+              ref: 'main',
+              inputs: {
+                image: '${{ matrix.image }}'
+              }
+            });
+            console.log('Triggered rebuild for ${{ matrix.image }}');
+
+  summary:
+    needs: trigger-rebuild
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## Weekly Rebuild Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| scratch-plus | Triggered |" >> $GITHUB_STEP_SUMMARY
+          echo "| distroless-static | Triggered |" >> $GITHUB_STEP_SUMMARY
+          echo "| wolfi-micro | Triggered |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check [Actions](https://github.com/${{ github.repository }}/actions/workflows/build-base.yml) for build results." >> $GITHUB_STEP_SUMMARY

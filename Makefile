@@ -1,4 +1,5 @@
 # Makefile for Secure Container Foundations
+# Delegates to ./run build system where possible, keeps backward compatibility
 
 REGISTRY := ghcr.io/ibshafique/base-images
 PLATFORM ?= linux/amd64  # Single platform for local builds
@@ -19,33 +20,41 @@ help:
 	@echo "Targets:"
 	@echo "  build-<image>          Build image locally (single platform)"
 	@echo "  build-<image>-multi    Build multi-platform image (requires push)"
+	@echo "  test-<image>           Run test suite for image"
 	@echo "  scan-<image>           Scan image for vulnerabilities"
-	@echo "  test-<image>           Test image functionality"
-	@echo "  policy-check           Validate all Dockerfiles"
+	@echo "  sign-<image>           Sign image with Cosign"
+	@echo "  policy-check           Validate all Dockerfiles with OPA"
 	@echo "  build-all              Build all images"
+	@echo "  test-all               Test all images"
+	@echo "  doctor                 Check build dependencies"
 	@echo "  test-reproducible      Test build reproducibility"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build-scratch-plus"
+	@echo "  make test-scratch-plus"
 	@echo "  make scan-scratch-plus"
+	@echo "  make doctor"
 	@echo "  make test-reproducible IMAGE=scratch-plus"
+	@echo ""
+	@echo "Build System:"
+	@echo "  ./run <module> <targets> [options]"
+	@echo "  ./run scratch-plus build --load"
+	@echo "  ./run scratch-plus clean build test --load"
 	@echo ""
 	@echo "Environment:"
 	@echo "  PLATFORM=$(PLATFORM)"
 	@echo "  REGISTRY=$(REGISTRY)"
 
-# Build targets (single platform, local)
+# Doctor: check all prerequisites
+.PHONY: doctor
+doctor:
+	@./run --doctor
+
+# Build targets (single platform, local) - delegates to ./run for base images
 .PHONY: build-%
 build-%:
-	@echo "Building $* for $(PLATFORM)..."
 	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
-		docker buildx build \
-			--platform $(PLATFORM) \
-			--tag $(REGISTRY)/$*:latest \
-			--cache-from type=registry,ref=$(REGISTRY)/$*:cache \
-			--cache-to type=registry,ref=$(REGISTRY)/$*:cache,mode=max \
-			--load \
-			images/base/$*/; \
+		./run $* build --load; \
 	elif echo "$(DEMO_IMAGES)" | grep -qw "$*"; then \
 		docker buildx build \
 			--platform $(PLATFORM) \
@@ -82,20 +91,37 @@ build-%-multi:
 		echo "Unknown image: $*"; exit 1; \
 	fi
 
-# Scan targets
-.PHONY: scan-%
-scan-%:
-	@echo "Scanning $* with Trivy..."
-	@trivy image --severity CRITICAL,HIGH $(REGISTRY)/$*:latest
-	@echo ""
-	@echo "Scanning $* with Grype..."
-	@grype $(REGISTRY)/$*:latest --fail-on critical
-
-# Test targets
+# Test targets - delegates to ./run for base images
 .PHONY: test-%
 test-%:
-	@echo "Testing $*..."
-	@scripts/test-image.sh $(REGISTRY)/$*:latest
+	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
+		./run $* build test --load; \
+	else \
+		echo "Testing $* with legacy script..."; \
+		scripts/test-image.sh $(REGISTRY)/$*:latest; \
+	fi
+
+# Scan targets - delegates to ./run for base images
+.PHONY: scan-%
+scan-%:
+	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
+		./run $* build scan --load; \
+	else \
+		echo "Scanning $* with Trivy..."; \
+		trivy image --severity CRITICAL,HIGH $(REGISTRY)/$*:latest; \
+		echo ""; \
+		echo "Scanning $* with Grype..."; \
+		grype $(REGISTRY)/$*:latest --fail-on critical; \
+	fi
+
+# Sign targets
+.PHONY: sign-%
+sign-%:
+	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
+		./run $* sign; \
+	else \
+		echo "Signing not supported for $*"; exit 1; \
+	fi
 
 # Policy check
 .PHONY: policy-check
@@ -126,10 +152,14 @@ test-reproducible:
 	fi
 	@scripts/verify-reproducibility.sh $(IMAGE)
 
-# Clean build cache
+# Clean build cache and build artifacts
 .PHONY: clean
 clean:
-	@echo "Cleaning build cache..."
+	@echo "Cleaning build artifacts..."
+	@for image in $(BASE_IMAGES); do \
+		rm -rf images/base/$$image/build; \
+	done
+	@echo "Cleaning Docker build cache..."
 	@docker buildx prune -f
 	@docker image prune -f
 

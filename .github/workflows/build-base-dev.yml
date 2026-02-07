@@ -1,0 +1,97 @@
+# .github/workflows/build-base-dev.yml
+# Development workflow: builds and tests on non-main branches
+# No signing, no push, single arch, local tests only
+
+name: Build Base Images (Dev)
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - 'images/base/**'
+      - '.shared/**'
+      - '.github/workflows/build-base-dev.yml'
+  pull_request:
+    paths:
+      - 'images/base/**'
+      - '.shared/**'
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.changes.outputs.images }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed images
+        id: changes
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD)
+          IMAGES=()
+
+          for image in scratch-plus distroless-static wolfi-micro; do
+            if echo "$CHANGED_FILES" | grep -q "images/base/${image}/\|\.shared/"; then
+              IMAGES+=("\"${image}\"")
+            fi
+          done
+
+          if [ ${#IMAGES[@]} -eq 0 ]; then
+            echo "images=[]" >> $GITHUB_OUTPUT
+          else
+            IMAGES_JSON=$(IFS=,; echo "[${IMAGES[*]}]")
+            echo "images=${IMAGES_JSON}" >> $GITHUB_OUTPUT
+          fi
+          echo "Changed images: ${IMAGES[*]:-none}"
+
+  build-test:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.images != '[]'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJson(needs.detect-changes.outputs.images) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (amd64 only)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./images/base/${{ matrix.image }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ghcr.io/${{ github.repository }}/${{ matrix.image }}:dev
+          cache-from: type=gha,scope=${{ matrix.image }}-dev
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-dev
+
+      - name: Run security tests
+        run: |
+          scripts/test-image.sh "ghcr.io/${{ github.repository }}/${{ matrix.image }}:dev"
+
+      - name: Scan with Trivy (advisory)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.image }}:dev
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 0
+
+      - name: Dockerfile lint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ./images/base/${{ matrix.image }}/Dockerfile
+          failure-threshold: warning
