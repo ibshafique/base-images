@@ -1,0 +1,214 @@
+# .github/workflows/build-base.yml
+name: Build Base Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'images/base/**'
+      - '.github/workflows/build-base.yml'
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly Sunday rebuild
+  workflow_dispatch:
+    inputs:
+      image:
+        description: 'Image to build (or "all")'
+        required: false
+        default: 'all'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # For keyless signing
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+  # Build per-architecture images
+  build-arch:
+    strategy:
+      matrix:
+        image: [scratch-plus, distroless-static, wolfi-micro]
+        arch: [amd64, arm64]
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      # Export digests for manifest creation
+      digest-${{ matrix.image }}-${{ matrix.arch }}: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          tags: |
+            type=raw,value={{date 'YYYYMMDD'}}-{{sha}}-${{ matrix.arch }}
+            type=raw,value=latest-${{ matrix.arch }}
+
+      - name: Build and push (per-arch)
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./images/base/${{ matrix.image }}
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
+          provenance: true  # SLSA Build L2 (note: not L3)
+          sbom: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (per-arch)
+        env:
+          COSIGN_YES: true
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+
+      - name: Verify signature
+        run: |
+          cosign verify \
+            --certificate-identity-regexp="^https://github.com/${{ github.repository }}" \
+            --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+
+      - name: Export digest for manifest
+        run: |
+          mkdir -p /tmp/digests/${{ matrix.image }}
+          echo "${{ steps.build.outputs.digest }}" > /tmp/digests/${{ matrix.image }}/${{ matrix.arch }}.txt
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.image }}-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.image }}/${{ matrix.arch }}.txt
+          retention-days: 1
+
+  # Create multi-arch manifests
+  create-manifest:
+    needs: build-arch
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        image: [scratch-plus, distroless-static, wolfi-micro]
+
+    steps:
+      - name: Download all digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read digests
+        id: digests
+        run: |
+          DIGEST_AMD64=$(cat /tmp/digests/digest-${{ matrix.image }}-amd64/amd64.txt)
+          DIGEST_ARM64=$(cat /tmp/digests/digest-${{ matrix.image }}-arm64/arm64.txt)
+
+          echo "amd64=$DIGEST_AMD64" >> $GITHUB_OUTPUT
+          echo "arm64=$DIGEST_ARM64" >> $GITHUB_OUTPUT
+
+      - name: Create multi-arch manifest
+        run: |
+          # Create manifest using digests (not tags)
+          docker buildx imagetools create -t \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}@${{ steps.digests.outputs.amd64 }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}@${{ steps.digests.outputs.arm64 }}
+
+      - name: Inspect manifest
+        run: |
+          docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:latest
+
+      - name: Sign multi-arch manifest
+        env:
+          COSIGN_YES: true
+        run: |
+          # Get manifest digest
+          MANIFEST_DIGEST=$(docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:latest \
+            --format '{{json .}}' | jq -r '.manifest.digest')
+
+          # Sign manifest
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}@$MANIFEST_DIGEST
+
+  # Scan images after build
+  scan:
+    needs: create-manifest
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        image: [scratch-plus, distroless-static, wolfi-micro]
+
+    steps:
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:latest
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: CRITICAL,HIGH
+          exit-code: 0
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+
+      - name: Scan with Grype (fail on CRITICAL only)
+        uses: anchore/scan-action@v3
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.image }}:latest
+          fail-build: true
+          severity-cutoff: critical
+
+      - name: Report scan status
+        if: failure()
+        run: |
+          echo "::error::CRITICAL vulnerability found in ${{ matrix.image }}"
+          echo "Image will not be promoted. Review GitHub Security tab."
+          exit 1

@@ -1,0 +1,40 @@
+# images/templates/go-static/Dockerfile.template
+# Template for building static Go applications
+# Usage: Copy to your project and customize
+
+# Build stage
+FROM golang:1.23-alpine AS builder
+
+WORKDIR /build
+
+# Copy go.mod and go.sum first (layer caching)
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build static binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build \
+    -ldflags="-s -w -X main.version={{VERSION}}" \
+    -o app \
+    ./cmd/yourapp
+
+# Runtime stage
+FROM ghcr.io/ibshafique/base-images/scratch-plus:latest
+
+# Copy binary from builder
+COPY --from=builder /build/app /app
+
+# Non-root user already set in base image (65532:65532)
+
+# Expose port (customize)
+EXPOSE 8080
+
+# Health check (customize)
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD ["/app", "healthcheck"]
+
+# Run application
+ENTRYPOINT ["/app"]
