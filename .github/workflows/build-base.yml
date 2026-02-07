@@ -138,8 +138,8 @@ jobs:
       - name: Read digests
         id: digests
         run: |
-          DIGEST_AMD64=$(cat /tmp/digests/digest-${{ matrix.image }}-amd64/amd64.txt)
-          DIGEST_ARM64=$(cat /tmp/digests/digest-${{ matrix.image }}-arm64/arm64.txt)
+          DIGEST_AMD64=$(cat /tmp/digests/amd64.txt)
+          DIGEST_ARM64=$(cat /tmp/digests/arm64.txt)
 
           echo "amd64=$DIGEST_AMD64" >> $GITHUB_OUTPUT
           echo "arm64=$DIGEST_ARM64" >> $GITHUB_OUTPUT
