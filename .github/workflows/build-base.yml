@@ -29,6 +29,7 @@ jobs:
   # Build per-architecture images
   build-arch:
     strategy:
+      fail-fast: false
       matrix:
         image: [scratch-plus, distroless-static, wolfi-micro]
         arch: [amd64, arm64]
@@ -114,6 +115,7 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         image: [scratch-plus, distroless-static, wolfi-micro]
 
@@ -176,6 +178,7 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         image: [scratch-plus, distroless-static, wolfi-micro]
 
