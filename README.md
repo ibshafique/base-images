@@ -89,9 +89,9 @@ Not intended for:
 
 | Image | Base | Size | Use Case |
 |-------|------|------|----------|
-| `scratch-plus` | scratch | ~200 KB | Static binaries (Go, Rust) |
-| `distroless-static` | Distroless | ~2 MB | Static binaries (glibc) |
-| `wolfi-micro` | Wolfi/scratch | ~2-3 MB | Static binaries + timezone data |
+| `scratch-plus` | scratch | ~400 KB | Static binaries (Go, Rust) |
+| `distroless-static` | Distroless | ~6 MB | Static binaries (glibc) |
+| `wolfi-micro` | Wolfi/scratch | ~6 MB | Static binaries + timezone data |
 
 ### Templates
 
@@ -105,41 +105,45 @@ Not intended for:
 
 - Docker with Buildx
 - Make
-- (Optional) Cosign, Trivy, Grype for security tooling
-
-### Setup
+- (Optional) Cosign, Trivy, Grype, Conftest for security tooling
 
 ```bash
-# Set up Docker Buildx builder
-make setup
-
-# Build all images locally
-make build-all
-
-# Test all images
-make test-all
+# Check what you have installed
+make doctor
 ```
 
-### Build a Single Image
+### Build and Test
 
 ```bash
-# Build scratch-plus for local platform
+# Set up Docker Buildx builder (one-time)
+make setup
+
+# Build a single image
 make build-scratch-plus
+
+# Build all images
+make build-all
+
+# Run security tests
+make test-scratch-plus
+
+# Scan for vulnerabilities (requires trivy or grype)
+make scan-scratch-plus
 
 # Build for multiple architectures (requires registry push)
 make build-scratch-plus-multi
 ```
 
-### Scan for Vulnerabilities
+### Advanced: Build DSL
+
+The repository also includes a Gradle-like bash build system (requires bash 4+):
 
 ```bash
-make scan-scratch-plus
-```
-
-### Test Build Reproducibility
-
-```bash
-make test-reproducible IMAGE=scratch-plus
+./run --doctor                              # Check environment
+./run scratch-plus build --load             # Build and load to Docker
+./run scratch-plus build test --load        # Build + test
+./run scratch-plus build -Parch=arm64       # Build for ARM64
+./run wolfi-micro clean build test --debug  # Full rebuild with debug
 ```
 
 ## Supply Chain Security
@@ -196,21 +200,40 @@ cosign verify \
 ```
 .
 ├── .github/workflows/
-│   └── build-base.yml          # CI/CD: build, sign, scan
+│   ├── build-base.yml          # Production CI/CD: build, sign, scan (multi-arch)
+│   ├── build-base-dev.yml      # Dev CI: build + test on branches/PRs (amd64 only)
+│   └── weekly-rebuild.yml      # Weekly rebuild for upstream security patches
+├── .shared/scripts/
+│   ├── lib/                    # Build system core (build-core, logger, utils)
+│   │   └── ext/                # Extensions (docker-buildx, cosign, trivy, template)
+│   └── test-lib/               # Test framework (test-core, utils)
+│       └── ext/                # Test extensions (docker, security assertions)
 ├── images/
 │   ├── base/
 │   │   ├── scratch-plus/       # Minimal scratch + CA certs + nonroot
 │   │   ├── distroless-static/  # Google Distroless (nonroot)
 │   │   └── wolfi-micro/        # Wolfi-based minimal + tzdata
+│   │   (each contains: Dockerfile, build.sh, test/)
 │   └── templates/
 │       └── go-static/          # Go application template
 ├── scripts/
-│   ├── test-image.sh           # Security validation tests
+│   ├── test-image.sh           # Standalone security validation tests
 │   └── verify-reproducibility.sh # Build reproducibility check
-├── Makefile                    # Build system
+├── policy/
+│   └── base.rego               # OPA/Conftest Dockerfile policy rules
+├── run                         # Build system runner (bash 4+)
+├── Makefile                    # Build system (works on any shell)
 ├── SECURITY.md                 # Security policy & SLSA/SBOM details
-└── README.md                   # This file
+└── IMPLEMENTATION.md           # Design notes and corrected implementations
 ```
+
+## CI/CD Workflows
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `build-base.yml` | Push to `main`, manual | Multi-arch build, sign, scan, push to GHCR |
+| `build-base-dev.yml` | Push to branches, PRs | amd64-only build + test + lint (no push, no signing) |
+| `weekly-rebuild.yml` | Sunday midnight UTC, manual | Triggers `build-base.yml` for all images to pick up upstream patches |
 
 ## License
 

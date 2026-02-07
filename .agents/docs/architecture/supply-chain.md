@@ -10,7 +10,7 @@ This repository implements a defense-in-depth supply chain security model for co
 
 - **Minimal base images**: scratch, distroless, Wolfi — no shells, no package managers
 - **Non-root users**: All images run as UID 65532 (nonroot)
-- **Pinned dependencies**: Alpine/Wolfi builder stages use digest-pinned tags
+- **Pinned dependencies**: scratch-plus uses a digest-pinned Alpine builder stage
 - **Multi-stage builds**: Builder stages are discarded; only artifacts are copied
 
 ### 2. CI/CD Pipeline Security
@@ -85,6 +85,6 @@ Scheduled weekly rebuilds (Sunday midnight UTC) pull fresh upstream images to in
 
 | Image | Base | Size | Use Case |
 |-------|------|------|----------|
-| scratch-plus | scratch | ~2MB | Static Go/Rust binaries |
-| distroless-static | distroless | ~5MB | Static binaries (glibc) |
-| wolfi-micro | scratch (Wolfi builder) | ~10MB | Apps needing tzdata |
+| scratch-plus | scratch | ~400KB | Static Go/Rust binaries |
+| distroless-static | distroless | ~6MB | Static binaries (glibc) |
+| wolfi-micro | scratch (Wolfi builder) | ~6MB | Apps needing tzdata |

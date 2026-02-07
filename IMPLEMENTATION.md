@@ -35,7 +35,7 @@ USER 65532:65532
 # Metadata
 LABEL org.opencontainers.image.title="scratch-plus"
 LABEL org.opencontainers.image.description="Minimal scratch image with CA certificates and non-root user"
-LABEL org.opencontainers.image.source="https://github.com/yourusername/secure-container-foundations"
+LABEL org.opencontainers.image.source="https://github.com/ibshafique/base-images"
 ```
 
 **Testing**:
@@ -43,17 +43,16 @@ LABEL org.opencontainers.image.source="https://github.com/yourusername/secure-co
 # Build
 docker build -t scratch-plus:test images/base/scratch-plus/
 
-# Verify non-root user exists
-docker run --rm scratch-plus:test cat /etc/passwd
-# Output: nonroot:x:65532:65532:nonroot:/home/nonroot:/sbin/nologin
-
-# Verify USER directive works
+# Verify USER directive (from host — no cat/shell in scratch images)
 docker inspect scratch-plus:test --format='{{.Config.User}}'
 # Output: 65532:65532
 
 # Verify size
 docker images scratch-plus:test --format "{{.Size}}"
-# Output: ~200 KB (acceptable overhead for passwd/group)
+# Output: ~400 KB
+
+# Run security tests
+scripts/test-image.sh scratch-plus:test
 ```
 
 **Alternative (Simpler)**:
@@ -118,13 +117,16 @@ LABEL org.opencontainers.image.description="Minimal Wolfi-based runtime with tim
 ```bash
 docker build -t wolfi-micro:test images/base/wolfi-micro/
 
-# Verify contents
-docker run --rm wolfi-micro:test cat /etc/passwd
-docker run --rm wolfi-micro:test ls /usr/share/zoneinfo/America/
+# Verify USER directive (from host — no cat/shell in scratch-based images)
+docker inspect wolfi-micro:test --format='{{.Config.User}}'
+# Output: 65532:65532
 
 # Verify size
 docker images wolfi-micro:test --format "{{.Size}}"
-# Output: ~2-3 MB
+# Output: ~6 MB
+
+# Run security tests
+scripts/test-image.sh wolfi-micro:test
 ```
 
 ---
@@ -145,7 +147,7 @@ FROM gcr.io/distroless/static-debian12:nonroot@sha256:def456...
 
 LABEL org.opencontainers.image.title="distroless-static"
 LABEL org.opencontainers.image.description="Google Distroless static image (glibc-based)"
-LABEL org.opencontainers.image.source="https://github.com/yourusername/secure-container-foundations"
+LABEL org.opencontainers.image.source="https://github.com/ibshafique/base-images"
 ```
 
 **Note**: Pin to digest for reproducibility:
@@ -202,7 +204,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     ./cmd/yourapp
 
 # Runtime stage
-FROM ghcr.io/yourusername/secure-container-foundations/scratch-plus:latest
+FROM ghcr.io/ibshafique/base-images/scratch-plus:latest
 
 # Copy binary from builder
 COPY --from=builder /build/app /app
@@ -646,11 +648,11 @@ gh workflow run build-base.yml --ref main
 gh run watch
 
 # Verify multi-arch manifest
-docker buildx imagetools inspect ghcr.io/your-repo/scratch-plus:latest
+docker buildx imagetools inspect ghcr.io/ibshafique/base-images/scratch-plus:latest
 
 # Verify signatures on both arch-specific and manifest
-cosign verify ghcr.io/your-repo/scratch-plus:latest-amd64
-cosign verify ghcr.io/your-repo/scratch-plus:latest
+cosign verify ghcr.io/ibshafique/base-images/scratch-plus:latest-amd64
+cosign verify ghcr.io/ibshafique/base-images/scratch-plus:latest
 ```
 
 ---
@@ -1094,7 +1096,7 @@ For an educational project, L2 provides sufficient supply-chain transparency whi
   },
   "invocation": {
     "configSource": {
-      "uri": "git+https://github.com/yourusername/secure-container-foundations@refs/heads/main",
+      "uri": "git+https://github.com/ibshafique/base-images@refs/heads/main",
       "digest": {"sha1": "abc123..."}
     },
     "parameters": {...}
@@ -1108,9 +1110,9 @@ For an educational project, L2 provides sufficient supply-chain transparency whi
 # View provenance attestation
 cosign verify-attestation \
   --type slsaprovenance \
-  --certificate-identity-regexp="https://github.com/yourusername/secure-container-foundations" \
+  --certificate-identity-regexp="https://github.com/ibshafique/base-images" \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-  ghcr.io/yourusername/secure-container-foundations/scratch-plus:latest \
+  ghcr.io/ibshafique/base-images/scratch-plus:latest \
   | jq -r '.payload' | base64 -d | jq
 ```
 
@@ -1171,16 +1173,16 @@ Not met (would be L3):
 # View SBOM attestation
 cosign verify-attestation \
   --type spdx \
-  --certificate-identity-regexp="https://github.com/yourusername/secure-container-foundations" \
+  --certificate-identity-regexp="https://github.com/ibshafique/base-images" \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-  ghcr.io/yourusername/secure-container-foundations/scratch-plus:latest \
+  ghcr.io/ibshafique/base-images/scratch-plus:latest \
   | jq -r '.payload' | base64 -d | jq
 
 # Alternative: use syft to read attached SBOM
-syft packages ghcr.io/yourusername/secure-container-foundations/scratch-plus:latest
+syft packages ghcr.io/ibshafique/base-images/scratch-plus:latest
 
 # Alternative: use docker scout
-docker scout sbom ghcr.io/yourusername/secure-container-foundations/scratch-plus:latest
+docker scout sbom ghcr.io/ibshafique/base-images/scratch-plus:latest
 ```
 
 **Update Documentation**:
@@ -1236,7 +1238,7 @@ Updated with build cache and fixed multi-arch issue:
 ```makefile
 # Makefile for Secure Container Foundations
 
-REGISTRY := ghcr.io/yourusername/secure-container-foundations
+REGISTRY := ghcr.io/ibshafique/base-images
 PLATFORM ?= linux/amd64  # Single platform for local builds
 MULTI_PLATFORMS := linux/amd64,linux/arm64  # Multi-platform for CI
 
@@ -1430,11 +1432,11 @@ gh workflow run build-base.yml --ref main
 gh run watch
 
 # Verify multi-arch manifest
-docker buildx imagetools inspect ghcr.io/your-fork/scratch-plus:latest
+docker buildx imagetools inspect ghcr.io/ibshafique/base-images/scratch-plus:latest
 
 # Verify signatures
-cosign verify ghcr.io/your-fork/scratch-plus:latest \
-  --certificate-identity-regexp="https://github.com/your-fork/secure-container-foundations" \
+cosign verify ghcr.io/ibshafique/base-images/scratch-plus:latest \
+  --certificate-identity-regexp="https://github.com/ibshafique/base-images" \
   --certificate-oidc-issuer=https://token.actions.githubusercontent.com
 ```
 
@@ -1444,7 +1446,7 @@ cosign verify ghcr.io/your-fork/scratch-plus:latest \
 ./scripts/verify-reproducibility.sh scratch-plus
 
 # Test validation
-./scripts/test-image.sh ghcr.io/your-repo/scratch-plus:latest
+./scripts/test-image.sh ghcr.io/ibshafique/base-images/scratch-plus:latest
 
 # Policy check
 make policy-check

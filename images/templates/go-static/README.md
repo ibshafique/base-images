@@ -32,7 +32,7 @@ See `example/` directory for a working HTTP server.
 
 - Go 1.23+
 - Docker Buildx
-- Base image: `scratch-plus:latest`
+- Base image: `ghcr.io/ibshafique/base-images/scratch-plus:latest`
 
 ## Security
 
@@ -52,7 +52,7 @@ RUN apk add --no-cache git ca-certificates
 ### Use CGO (requires glibc):
 ```dockerfile
 # Change runtime base to distroless-static
-FROM ghcr.io/.../distroless-static:latest
+FROM ghcr.io/ibshafique/base-images/distroless-static:latest
 
 # Change build to:
 RUN CGO_ENABLED=1 go build ...

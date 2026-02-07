@@ -24,3 +24,4 @@ USER 65532:65532
 
 LABEL org.opencontainers.image.title="wolfi-micro"
 LABEL org.opencontainers.image.description="Minimal Wolfi-based runtime with timezone support"
+LABEL org.opencontainers.image.source="https://github.com/ibshafique/base-images"
