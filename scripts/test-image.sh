@@ -53,7 +53,7 @@ CMD=$(docker inspect "$IMAGE" --format='{{.Config.Cmd}}' 2>/dev/null)
 
 if [[ "$ENTRYPOINT" != "[]" ]] && [[ "$ENTRYPOINT" != "" ]]; then
     # Has entrypoint, try to run with read-only
-    if timeout 5 docker run --rm --read-only "$IMAGE" true 2>/dev/null; then
+    if docker run --rm --read-only "$IMAGE" true 2>/dev/null; then
         echo "OK"
     else
         echo "WARN (image requires writable filesystem)"
@@ -67,7 +67,7 @@ fi
 #
 echo -n "  ✓ Checking capability drop... "
 if [[ "$ENTRYPOINT" != "[]" ]] && [[ "$ENTRYPOINT" != "" ]]; then
-    if timeout 5 docker run --rm --cap-drop=ALL "$IMAGE" true 2>/dev/null; then
+    if docker run --rm --cap-drop=ALL "$IMAGE" true 2>/dev/null; then
         echo "OK"
     else
         echo "WARN (image requires capabilities)"

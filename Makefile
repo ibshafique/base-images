@@ -1,17 +1,13 @@
 # Makefile for Secure Container Foundations
-# Delegates to ./run build system where possible, keeps backward compatibility
+# Self-contained: calls docker directly, works on any shell (no bash 4+ required)
+# For the full build DSL, use: ./run <module> <targets> [options] (requires bash 4+)
 
 REGISTRY := ghcr.io/ibshafique/base-images
-PLATFORM ?= linux/amd64  # Single platform for local builds
-MULTI_PLATFORMS := linux/amd64,linux/arm64  # Multi-platform for CI
+PLATFORM ?= linux/amd64
+MULTI_PLATFORMS := linux/amd64,linux/arm64
 
-# Base images
 BASE_IMAGES := scratch-plus distroless-static wolfi-micro
-
-# Demo images
-DEMO_IMAGES := hello-secure
-
-ALL_IMAGES := $(BASE_IMAGES) $(DEMO_IMAGES)
+ALL_IMAGES := $(BASE_IMAGES)
 
 .PHONY: help
 help:
@@ -20,7 +16,7 @@ help:
 	@echo "Targets:"
 	@echo "  build-<image>          Build image locally (single platform)"
 	@echo "  build-<image>-multi    Build multi-platform image (requires push)"
-	@echo "  test-<image>           Run test suite for image"
+	@echo "  test-<image>           Run security tests for image"
 	@echo "  scan-<image>           Scan image for vulnerabilities"
 	@echo "  sign-<image>           Sign image with Cosign"
 	@echo "  policy-check           Validate all Dockerfiles with OPA"
@@ -29,121 +25,106 @@ help:
 	@echo "  doctor                 Check build dependencies"
 	@echo "  test-reproducible      Test build reproducibility"
 	@echo ""
+	@echo "Images: $(BASE_IMAGES)"
+	@echo ""
 	@echo "Examples:"
 	@echo "  make build-scratch-plus"
 	@echo "  make test-scratch-plus"
 	@echo "  make scan-scratch-plus"
+	@echo "  make build-all"
 	@echo "  make doctor"
-	@echo "  make test-reproducible IMAGE=scratch-plus"
-	@echo ""
-	@echo "Build System:"
-	@echo "  ./run <module> <targets> [options]"
-	@echo "  ./run scratch-plus build --load"
-	@echo "  ./run scratch-plus clean build test --load"
 	@echo ""
 	@echo "Environment:"
 	@echo "  PLATFORM=$(PLATFORM)"
 	@echo "  REGISTRY=$(REGISTRY)"
 
-# Doctor: check all prerequisites
+# ============================================================================
+# Doctor: check prerequisites
+# ============================================================================
+
 .PHONY: doctor
 doctor:
-	@./run --doctor
+	@echo "=== Build Environment Check ==="
+	@echo ""
+	@echo "Required:"
+	@command -v docker >/dev/null 2>&1 \
+		&& echo "  [OK] docker ($$(docker --version 2>/dev/null | head -1))" \
+		|| echo "  [MISSING] docker"
+	@docker buildx version >/dev/null 2>&1 \
+		&& echo "  [OK] docker buildx ($$(docker buildx version 2>/dev/null | head -1))" \
+		|| echo "  [MISSING] docker buildx"
+	@echo ""
+	@echo "Optional:"
+	@command -v cosign >/dev/null 2>&1 \
+		&& echo "  [OK] cosign - image signing" \
+		|| echo "  [--] cosign - image signing (not installed)"
+	@command -v trivy >/dev/null 2>&1 \
+		&& echo "  [OK] trivy - vulnerability scanning" \
+		|| echo "  [--] trivy - vulnerability scanning (not installed)"
+	@command -v grype >/dev/null 2>&1 \
+		&& echo "  [OK] grype - vulnerability scanning" \
+		|| echo "  [--] grype - vulnerability scanning (not installed)"
+	@command -v conftest >/dev/null 2>&1 \
+		&& echo "  [OK] conftest - OPA policy testing" \
+		|| echo "  [--] conftest - OPA policy testing (not installed)"
+	@echo ""
+	@echo "Platform: $$(uname -s) $$(uname -m)"
 
-# Build targets (single platform, local) - delegates to ./run for base images
+# ============================================================================
+# Build targets
+# ============================================================================
+
 .PHONY: build-%
 build-%:
 	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
-		./run $* build --load; \
-	elif echo "$(DEMO_IMAGES)" | grep -qw "$*"; then \
+		echo "Building $* for $(PLATFORM)..."; \
 		docker buildx build \
 			--platform $(PLATFORM) \
 			--tag $(REGISTRY)/$*:latest \
-			--cache-from type=registry,ref=$(REGISTRY)/$*:cache \
-			--cache-to type=registry,ref=$(REGISTRY)/$*:cache,mode=max \
 			--load \
-			images/demo/$*/; \
+			images/base/$*/; \
 	else \
-		echo "Unknown image: $*"; exit 1; \
+		echo "Unknown image: $*. Available: $(BASE_IMAGES)"; exit 1; \
 	fi
 
-# Build targets (multi-platform, push required)
 .PHONY: build-%-multi
 build-%-multi:
-	@echo "Building $* for $(MULTI_PLATFORMS) (will push to registry)..."
 	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
+		echo "Building $* for $(MULTI_PLATFORMS) (pushing to registry)..."; \
 		docker buildx build \
 			--platform $(MULTI_PLATFORMS) \
 			--tag $(REGISTRY)/$*:latest \
-			--cache-from type=registry,ref=$(REGISTRY)/$*:cache \
-			--cache-to type=registry,ref=$(REGISTRY)/$*:cache,mode=max \
 			--push \
 			images/base/$*/; \
-	elif echo "$(DEMO_IMAGES)" | grep -qw "$*"; then \
-		docker buildx build \
-			--platform $(MULTI_PLATFORMS) \
-			--tag $(REGISTRY)/$*:latest \
-			--cache-from type=registry,ref=$(REGISTRY)/$*:cache \
-			--cache-to type=registry,ref=$(REGISTRY)/$*:cache,mode=max \
-			--push \
-			images/demo/$*/; \
 	else \
-		echo "Unknown image: $*"; exit 1; \
+		echo "Unknown image: $*. Available: $(BASE_IMAGES)"; exit 1; \
 	fi
 
-# Test targets - delegates to ./run for base images
-.PHONY: test-%
-test-%:
-	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
-		./run $* build test --load; \
-	else \
-		echo "Testing $* with legacy script..."; \
-		scripts/test-image.sh $(REGISTRY)/$*:latest; \
-	fi
-
-# Scan targets - delegates to ./run for base images
-.PHONY: scan-%
-scan-%:
-	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
-		./run $* build scan --load; \
-	else \
-		echo "Scanning $* with Trivy..."; \
-		trivy image --severity CRITICAL,HIGH $(REGISTRY)/$*:latest; \
-		echo ""; \
-		echo "Scanning $* with Grype..."; \
-		grype $(REGISTRY)/$*:latest --fail-on critical; \
-	fi
-
-# Sign targets
-.PHONY: sign-%
-sign-%:
-	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
-		./run $* sign; \
-	else \
-		echo "Signing not supported for $*"; exit 1; \
-	fi
-
-# Policy check
-.PHONY: policy-check
-policy-check:
-	@echo "Validating Dockerfiles with Conftest..."
-	@find images -name Dockerfile -exec echo "Checking {}..." \; -exec conftest test {} -p policy/base.rego \;
-
-# Build all images
 .PHONY: build-all
 build-all:
 	@for image in $(ALL_IMAGES); do \
 		$(MAKE) build-$$image || exit 1; \
 	done
 
-# Test all images
+# ============================================================================
+# Test targets
+# ============================================================================
+
+.PHONY: test-%
+test-%:
+	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
+		echo "Testing $*..."; \
+		scripts/test-image.sh "$(REGISTRY)/$*:latest"; \
+	else \
+		echo "Unknown image: $*. Available: $(BASE_IMAGES)"; exit 1; \
+	fi
+
 .PHONY: test-all
 test-all:
 	@for image in $(ALL_IMAGES); do \
 		$(MAKE) test-$$image || exit 1; \
 	done
 
-# Test reproducibility
 .PHONY: test-reproducible
 test-reproducible:
 	@if [ -z "$(IMAGE)" ]; then \
@@ -152,25 +133,85 @@ test-reproducible:
 	fi
 	@scripts/verify-reproducibility.sh $(IMAGE)
 
-# Clean build cache and build artifacts
+# ============================================================================
+# Scan targets
+# ============================================================================
+
+.PHONY: scan-%
+scan-%:
+	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
+		echo "Scanning $*..."; \
+		if command -v trivy >/dev/null 2>&1; then \
+			echo "--- Trivy ---"; \
+			trivy image --severity CRITICAL,HIGH $(REGISTRY)/$*:latest; \
+		fi; \
+		if command -v grype >/dev/null 2>&1; then \
+			echo "--- Grype ---"; \
+			grype $(REGISTRY)/$*:latest --fail-on critical; \
+		fi; \
+		if ! command -v trivy >/dev/null 2>&1 && ! command -v grype >/dev/null 2>&1; then \
+			echo "No scanner found. Install trivy or grype."; exit 1; \
+		fi; \
+	else \
+		echo "Unknown image: $*. Available: $(BASE_IMAGES)"; exit 1; \
+	fi
+
+# ============================================================================
+# Sign targets
+# ============================================================================
+
+.PHONY: sign-%
+sign-%:
+	@if echo "$(BASE_IMAGES)" | grep -qw "$*"; then \
+		if ! command -v cosign >/dev/null 2>&1; then \
+			echo "cosign not found. Install: brew install cosign"; exit 1; \
+		fi; \
+		echo "Signing $*..."; \
+		cosign sign --yes $(REGISTRY)/$*:latest; \
+	else \
+		echo "Unknown image: $*. Available: $(BASE_IMAGES)"; exit 1; \
+	fi
+
+# ============================================================================
+# Policy check
+# ============================================================================
+
+.PHONY: policy-check
+policy-check:
+	@if ! command -v conftest >/dev/null 2>&1; then \
+		echo "conftest not found. Install: brew install conftest"; exit 1; \
+	fi
+	@echo "Validating Dockerfiles..."
+	@for image in $(BASE_IMAGES); do \
+		echo "  Checking images/base/$$image/Dockerfile..."; \
+		conftest test images/base/$$image/Dockerfile -p policy/base.rego || exit 1; \
+	done
+
+# ============================================================================
+# Setup / Cleanup
+# ============================================================================
+
+.PHONY: setup
+setup:
+	@echo "Setting up Docker Buildx..."
+	@docker buildx create --name container-builder --use 2>/dev/null || docker buildx use container-builder 2>/dev/null || true
+	@docker buildx inspect --bootstrap
+
+.PHONY: teardown
+teardown:
+	@echo "Removing Docker Buildx builder..."
+	@docker buildx rm container-builder 2>/dev/null || true
+
 .PHONY: clean
 clean:
 	@echo "Cleaning build artifacts..."
 	@for image in $(BASE_IMAGES); do \
 		rm -rf images/base/$$image/build; \
 	done
+	@echo "Removing built images..."
+	@for image in $(BASE_IMAGES); do \
+		docker rmi $(REGISTRY)/$$image:latest 2>/dev/null || true; \
+	done
 	@echo "Cleaning Docker build cache..."
 	@docker buildx prune -f
 	@docker image prune -f
-
-# Setup buildx (run once)
-.PHONY: setup
-setup:
-	@echo "Setting up Docker Buildx..."
-	@docker buildx create --name container-builder --use || true
-	@docker buildx inspect --bootstrap
-
-.PHONY: teardown
-teardown:
-	@echo "Removing Docker Buildx builder..."
-	@docker buildx rm container-builder || true

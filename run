@@ -28,13 +28,14 @@ IMAGE_SEARCH_PATHS=(
 # Required tools for basic operation
 REQUIRED_TOOLS=(docker jq)
 
-# Optional tools with descriptions
-declare -A OPTIONAL_TOOLS=(
-    [cosign]="Image signing (Sigstore)"
-    [trivy]="Vulnerability scanning"
-    [grype]="Alternative vulnerability scanner"
-    [conftest]="OPA policy testing"
-    [envsubst]="Template rendering"
+# Optional tools (parallel arrays for bash 3.2 compatibility — no associative arrays)
+OPTIONAL_TOOL_NAMES=(cosign trivy grype conftest envsubst)
+OPTIONAL_TOOL_DESCS=(
+    "Image signing (Sigstore)"
+    "Vulnerability scanning"
+    "Alternative vulnerability scanner"
+    "OPA policy testing"
+    "Template rendering"
 )
 
 # ============================================================================
@@ -191,8 +192,9 @@ run_doctor() {
     # Check optional tools
     echo ""
     echo "Optional tools:"
-    for tool in "${!OPTIONAL_TOOLS[@]}"; do
-        local desc="${OPTIONAL_TOOLS[$tool]}"
+    for i in "${!OPTIONAL_TOOL_NAMES[@]}"; do
+        local tool="${OPTIONAL_TOOL_NAMES[$i]}"
+        local desc="${OPTIONAL_TOOL_DESCS[$i]}"
         if command -v "$tool" >/dev/null 2>&1; then
             _success "$tool - $desc"
         else
