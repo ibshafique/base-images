@@ -6,7 +6,7 @@ REGISTRY := ghcr.io/ibshafique/base-images
 PLATFORM ?= linux/amd64
 MULTI_PLATFORMS := linux/amd64,linux/arm64
 
-BASE_IMAGES := scratch-plus distroless-static wolfi-micro
+BASE_IMAGES := scratch-plus distroless-static wolfi-micro netshell
 ALL_IMAGES := $(BASE_IMAGES)
 
 .PHONY: help

@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [scratch-plus, distroless-static, wolfi-micro]
+        image: [scratch-plus, distroless-static, wolfi-micro, netshell]
         arch: [amd64, arm64]
 
     runs-on: ubuntu-latest
@@ -117,7 +117,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [scratch-plus, distroless-static, wolfi-micro]
+        image: [scratch-plus, distroless-static, wolfi-micro, netshell]
 
     steps:
       - name: Download all digests
@@ -183,7 +183,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [scratch-plus, distroless-static, wolfi-micro]
+        image: [scratch-plus, distroless-static, wolfi-micro, netshell]
 
     steps:
       - name: Scan with Trivy
