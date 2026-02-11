@@ -4,7 +4,7 @@ An educational reference implementation demonstrating how to build supply-chain 
 
 ## Features
 
-- Minimal, hardened base images (scratch-plus, distroless-static, wolfi-micro)
+- Minimal, hardened base images (scratch-plus, distroless-static, wolfi-micro, netshell)
 - Multi-arch builds (amd64/arm64) with automated CI/CD
 - Supply-chain security: Cosign signing, SBOM generation, SLSA Build L2 provenance
 - OPA/Conftest policy enforcement for Dockerfiles
@@ -92,6 +92,7 @@ Not intended for:
 | `scratch-plus` | scratch | ~400 KB | Static binaries (Go, Rust) |
 | `distroless-static` | Distroless | ~6 MB | Static binaries (glibc) |
 | `wolfi-micro` | Wolfi/scratch | ~6 MB | Static binaries + timezone data |
+| `netshell` | Alpine | ~35 MB | Kubernetes debug/troubleshooting sidecar |
 
 ### Templates
 
@@ -212,7 +213,8 @@ cosign verify \
 │   ├── base/
 │   │   ├── scratch-plus/       # Minimal scratch + CA certs + nonroot
 │   │   ├── distroless-static/  # Google Distroless (nonroot)
-│   │   └── wolfi-micro/        # Wolfi-based minimal + tzdata
+│   │   ├── wolfi-micro/        # Wolfi-based minimal + tzdata
+│   │   └── netshell/           # Debug sidecar with network/TLS/process tools
 │   │   (each contains: Dockerfile, build.sh, test/)
 │   └── templates/
 │       └── go-static/          # Go application template

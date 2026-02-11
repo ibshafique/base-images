@@ -12,7 +12,8 @@ This is a **Docker base images** repository that produces minimal, security-hard
 images/base/
 ├── scratch-plus/          # Scratch + CA certs + nonroot user
 ├── distroless-static/     # Google distroless static (glibc)
-└── wolfi-micro/           # Wolfi-based minimal + tzdata
+├── wolfi-micro/           # Wolfi-based minimal + tzdata
+└── netshell/              # Debug sidecar with network/TLS/process tools
 
 .shared/scripts/
 ├── lib/                   # Build system libraries
